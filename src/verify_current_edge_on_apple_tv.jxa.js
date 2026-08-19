@@ -20,7 +20,7 @@ function run(argv) {
   const edge = Application("Microsoft Edge")
   const window = edge.windows().find(candidate =>
     windowId === null || String(candidate.id()) === windowId)
-  if (!window) throw new Error("找不到待验证的 Edge 窗口：" + windowId)
+  if (!window) throw new Error("Could not find the Edge window to verify: " + windowId)
 
   const screens = $.NSScreen.screens
   let display = null
@@ -31,9 +31,9 @@ function run(argv) {
       break
     }
   }
-  if (!display) throw new Error("Apple TV 尚未作为独立显示器出现。")
+  if (!display) throw new Error("Apple TV is not available as a separate display.")
   if (![display.x, display.y, display.width, display.height].every(Number.isFinite)) {
-    throw new Error("无法读取 Apple TV 显示区：" + JSON.stringify(display))
+    throw new Error("Could not read the Apple TV display bounds: " + JSON.stringify(display))
   }
 
   const bounds = window.bounds()
@@ -45,7 +45,7 @@ function run(argv) {
     Math.abs(bounds.y + bounds.height - display.y - display.height)
   ]
   if (edges.some(distance => distance > tolerance)) {
-    throw new Error("窗口尚未在 Apple TV 上最大化：" + JSON.stringify({windowId: window.id(), bounds, display, edges}))
+    throw new Error("The window is not maximized on Apple TV: " + JSON.stringify({windowId: window.id(), bounds, display, edges}))
   }
 
   return "PASS " + JSON.stringify({windowId: window.id(), url: window.activeTab().url(), bounds, display})

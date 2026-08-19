@@ -1,38 +1,117 @@
 # tvmode
 
-把 Microsoft Edge 窗口移动到 Apple TV，并让 Apple TV 作为独立显示器使用，而不是镜像 Mac 屏幕。
+Move Microsoft Edge windows to an Apple TV and use the Apple TV as a separate display instead of mirroring the Mac.
 
-## 环境要求
+## Requirements
 
-- macOS 与 Microsoft Edge
-- Mac 和 Apple TV 位于同一网络
-- Apple TV 已开机，并可在“屏幕镜像”中发现
-- Terminal 或脚本已获得“辅助功能”权限，并允许控制 Microsoft Edge
+- macOS and Microsoft Edge
+- The Mac and Apple TV are on the same network
+- The Apple TV is powered on and discoverable in Screen Mirroring
+- Terminal or the invoking script has Accessibility access and permission to control Microsoft Edge
 
-## 使用方法
+## Usage
 
-### 打开指定网页
+### Open a configured webpage
 
-编辑 `open_to_apple_tv.command` 顶部的 `URL` 和 `MIRROR_DEVICE`，然后从 Finder 双击它，或在 Terminal 中运行：
+Edit `URL` and `MIRROR_DEVICE` at the top of `open_to_apple_tv.command`, then double-click it in Finder or run it in Terminal:
 
 ```zsh
 ./open_to_apple_tv.command
 ```
 
-脚本会启动 Edge、新建窗口、连接 Apple TV、选择独立显示器模式，并把新窗口移动过去。全部成功后，从 Finder 启动脚本所打开的 Terminal 窗口会自动关闭。
+The script starts Edge, creates a window, connects to Apple TV in separate-display mode, and moves the new window to it.
 
-### 移动当前 Edge 窗口
+All four `.command` files briefly show Terminal when launched from Finder. The launching window closes automatically on success and remains open with the error on failure. SSH calls never operate on Terminal; errors are written to stderr and return a nonzero exit code.
 
-编辑 `extend_current_edge_to_apple_tv.command` 顶部的 `APPLE_TV`，然后运行：
+### Move the current Edge window
+
+Edit `APPLE_TV` at the top of `extend_current_edge_to_apple_tv.command`, then run:
 
 ```zsh
 ./extend_current_edge_to_apple_tv.command
 ```
 
-该命令不会新建窗口或打开 URL；它会移动当前最前面的 Edge 窗口，并验证窗口是否位于 Apple TV 显示区。
+This command does not create a window or open a URL. It moves the frontmost Edge window and verifies that the window is on the Apple TV display.
 
-## 工作方式
+### Stop Apple TV mode
 
-`open_to_apple_tv.jxa.js` 是两个入口共用的实现，负责通过 macOS 辅助功能 API 操作 Control Center 和 Edge。`verify_current_edge_on_apple_tv.jxa.js` 负责验证现有窗口的位置。
+Edit `APPLE_TV` at the top of `stop_extending_apple_tv.command`, then run:
 
-脚本依赖 macOS 和 Edge 的界面结构，系统升级后可能需要调整辅助功能选择器。涉及投屏、窗口移动或显示器坐标的改动，应在真实 Apple TV 上验收。
+```zsh
+./stop_extending_apple_tv.command
+```
+
+If Apple TV is being used as a separate display, the command closes every Edge window on that display before stopping extension. It does nothing when Apple TV is not extended.
+
+## iPhone Shortcut over SSH
+
+Use the Run Script over SSH action in iPhone Shortcuts and connect it to the Mac running these scripts. The Mac must have an active desktop login, and `osascript` must have Accessibility and Automation permissions.
+
+### One-button automatic toggle (recommended)
+
+`toggle_apple_tv.command` follows the Mac's current state:
+
+- Not extended to Apple TV: opens the webpage and moves its Edge window to Apple TV.
+- Extended with no Edge window on Apple TV: opens the webpage and moves its Edge window there.
+- Extended with an Edge window on Apple TV: closes all Edge windows there and stops extension.
+
+Replace the SSH script in the existing Open shortcut with the command below, then delete or disable the separate Stop shortcut. Keep the state decision on the Mac by using only this one Run Script over SSH action:
+
+```zsh
+output=$(
+  /bin/zsh /Users/chrisyao/Projects/tvmode/toggle_apple_tv.command 2>&1
+)
+exit_code=$?
+
+if (( exit_code == 0 )); then
+  print "OK: $output"
+else
+  print "ERROR ($exit_code): $output"
+fi
+
+exit "$exit_code"
+```
+
+### Open the webpage manually
+
+```zsh
+output=$(
+  /bin/zsh /Users/chrisyao/Projects/tvmode/open_to_apple_tv.command 2>&1
+)
+exit_code=$?
+
+if (( exit_code == 0 )); then
+  print "OK"
+else
+  print "ERROR ($exit_code): $output"
+fi
+
+exit "$exit_code"
+```
+
+### Stop extension manually
+
+```zsh
+output=$(
+  /bin/zsh /Users/chrisyao/Projects/tvmode/stop_extending_apple_tv.command 2>&1
+)
+exit_code=$?
+
+if (( exit_code == 0 )); then
+  print "OK: $output"
+else
+  print "ERROR ($exit_code): $output"
+fi
+
+exit "$exit_code"
+```
+
+SSH calls do not open or close Terminal on the Mac. These wrappers capture stdout and stderr together, return `0` on success, and preserve the inner script's nonzero exit code on failure. Successful toggle and stop outputs report which action ran and which Edge windows were closed.
+
+## Project structure
+
+- The four `.command` files in the repository root are user entry points that can be launched from Finder. The recommended phone entry point is `toggle_apple_tv.command`.
+- `src/open_to_apple_tv.jxa.js` is shared by all four entry points and automates Control Center and Edge through macOS Accessibility APIs.
+- `src/verify_current_edge_on_apple_tv.jxa.js` verifies the position of an existing window.
+
+The scripts depend on the macOS and Edge accessibility hierarchies, which may change after system updates. Changes involving screen mirroring, window movement, or display coordinates must be validated on a real Apple TV.
