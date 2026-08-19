@@ -55,58 +55,28 @@ Use the Run Script over SSH action in iPhone Shortcuts and connect it to the Mac
 - Extended with no Edge window on Apple TV: opens the webpage and moves its Edge window there.
 - Extended with an Edge window on Apple TV: closes all Edge windows there and stops extension.
 
-Replace the SSH script in the existing Open shortcut with the command below, then delete or disable the separate Stop shortcut. Keep the state decision on the Mac by using only this one Run Script over SSH action:
+Every command prints exactly one state after a successful operation:
+
+- `open`: Apple TV mode is open and Edge accepted the command to move the window to Apple TV.
+- `close`: Apple TV mode is closed.
+
+On failure, the command exits with a nonzero status and never prints a success state.
+The open path does not turn a completed move into an error solely because macOS reports stale window coordinates. The recommended toggle command also removes `osascript`'s repeated `execution error: Error:` wrapper from genuine failures.
+
+Replace the SSH script in the existing shortcut with this wrapper. It returns `open`, `close`, or a clean error message without stopping the shortcut:
 
 ```zsh
-output=$(
-  /bin/zsh /Users/chrisyao/Projects/tvmode/toggle_apple_tv.command 2>&1
-)
-exit_code=$?
-
-if (( exit_code == 0 )); then
-  print "OK: $output"
-else
-  print "ERROR ($exit_code): $output"
-fi
-
-exit "$exit_code"
+output=$(/bin/zsh /Users/chrisyao/Projects/tvmode/toggle_apple_tv.command 2>&1)
+print -r -- "$output"
 ```
 
-### Open the webpage manually
+After **Run Script over SSH**, add an **If** action:
 
-```zsh
-output=$(
-  /bin/zsh /Users/chrisyao/Projects/tvmode/open_to_apple_tv.command 2>&1
-)
-exit_code=$?
+1. If the result is `open`, use **Open App** for the other app.
+2. Otherwise, if the result is `close`, run that app's own close/stop action. If it has no such action, use **Go to Home Screen**; iOS Shortcuts cannot force-quit an arbitrary app.
+3. Otherwise, use **Show Alert** with the complete script result. The alert will contain only the specific error message.
 
-if (( exit_code == 0 )); then
-  print "OK"
-else
-  print "ERROR ($exit_code): $output"
-fi
-
-exit "$exit_code"
-```
-
-### Stop extension manually
-
-```zsh
-output=$(
-  /bin/zsh /Users/chrisyao/Projects/tvmode/stop_extending_apple_tv.command 2>&1
-)
-exit_code=$?
-
-if (( exit_code == 0 )); then
-  print "OK: $output"
-else
-  print "ERROR ($exit_code): $output"
-fi
-
-exit "$exit_code"
-```
-
-SSH calls do not open or close Terminal on the Mac. These wrappers capture stdout and stderr together, return `0` on success, and preserve the inner script's nonzero exit code on failure. Successful toggle and stop outputs report which action ran and which Edge windows were closed.
+SSH calls do not open or close Terminal on the Mac.
 
 ## Project structure
 

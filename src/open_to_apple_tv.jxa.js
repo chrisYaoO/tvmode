@@ -259,9 +259,9 @@ function closeEdgeWindowsOnDisplay(display) {
 
 function stopExtending(deviceName) {
   const display = displayNamed(deviceName)
-  if (!display || display.isMirrored) return {wasExtending: false, closedWindowIds: []}
+  if (!display || display.isMirrored) return
 
-  const closedWindowIds = closeEdgeWindowsOnDisplay(display)
+  closeEdgeWindowsOnDisplay(display)
   leaveFullScreenSpace()
   const app = controlCenterAX()
   openScreenMirroring(app)
@@ -273,7 +273,6 @@ function stopExtending(deviceName) {
   if (!waitFor(() => stopSucceeded(isExtending(app)), 15)) {
     throw new Error("Edge windows were closed, but Apple TV '" + deviceName + "' is still extended.")
   }
-  return {wasExtending: true, closedWindowIds}
 }
 
 function stopSucceeded(currentlyExtending) {
@@ -375,28 +374,27 @@ function openOnAppleTV(deviceName, url) {
   edge.activate()
   delay(0.3)
   moveEdgeWindow(deviceName)
-
-  return {action: "opened", windowId: String(window.id()), url: window.activeTab().url()}
 }
 
 function toggleAppleTV(deviceName, url) {
   const display = displayNamed(deviceName)
   const windows = display && !display.isMirrored ? edgeWindowsOnDisplay(display) : []
   if (toggleAction(display, windows.length) === "stop") {
-    const result = stopExtending(deviceName)
-    return {
-      action: "stopped",
-      wasExtending: result.wasExtending,
-      closedWindowIds: result.closedWindowIds
-    }
+    stopExtending(deviceName)
+    return "close"
   }
-  return openOnAppleTV(deviceName, url)
+  openOnAppleTV(deviceName, url)
+  return "open"
 }
 
 function run(argv) {
   const deviceName = String(argv[0] || "Apple TV")
-  if (argv[1] === "--stop") return JSON.stringify(stopExtending(deviceName))
+  if (argv[1] === "--stop") {
+    stopExtending(deviceName)
+    return "close"
+  }
   if (argv[1] === "--self-test") return selfTest()
-  if (argv[1] === "--toggle") return JSON.stringify(toggleAppleTV(deviceName, argv[2] || null))
-  return JSON.stringify(openOnAppleTV(deviceName, argv[1] || null))
+  if (argv[1] === "--toggle") return toggleAppleTV(deviceName, argv[2] || null)
+  openOnAppleTV(deviceName, argv[1] || null)
+  return "open"
 }
