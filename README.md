@@ -11,6 +11,25 @@ Move Microsoft Edge windows to an Apple TV and use the Apple TV as a separate di
 
 ## Usage
 
+### Toggle on Mac without opening Terminal
+
+Double-click `Toggle Apple TV.app` in Finder. It runs the existing
+`toggle_apple_tv.command` without opening Terminal and shows an alert if the
+command fails. You can drag the app to the Dock for convenient access.
+
+Keep the app in the repository root, beside `toggle_apple_tv.command`; it uses
+the same URL and Apple TV configuration as that command. On first use, macOS
+may require granting the app Accessibility access in **System Settings →
+Privacy & Security → Accessibility**, and permission to control Edge and
+System Events.
+
+The app is generated locally and is not committed. To create or rebuild it,
+run this once from the repository root:
+
+```zsh
+/usr/bin/osacompile -o "Toggle Apple TV.app" src/toggle_apple_tv.applescript
+```
+
 ### Open a configured webpage
 
 Edit `URL` and `MIRROR_DEVICE` at the top of `open_to_apple_tv.command`, then double-click it in Finder or run it in Terminal:
