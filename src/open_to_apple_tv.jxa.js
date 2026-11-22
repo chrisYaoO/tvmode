@@ -29,12 +29,12 @@ function press(element, action) {
   return $.AXUIElementPerformAction(element, action || "AXPress") === 0
 }
 
-function waitFor(predicate, seconds) {
+function waitFor(predicate, seconds, interval = 0.1) {
   const end = Date.now() + seconds * 1000
   while (Date.now() < end) {
     const result = predicate()
     if (result) return result
-    delay(0.1)
+    delay(interval)
   }
   return null
 }
@@ -190,45 +190,68 @@ function screenMirroringDevices(app) {
   return devices
 }
 
-function mirroringDevice(app, deviceName, seconds) {
-  return waitFor(() => find(app, element => {
+function mirroringDevice(app, deviceName) {
+  return find(app, element => {
     const id = ax(element, "AXIdentifier")
     const role = ax(element, "AXRole")
     return (role === "AXCheckBox" || role === "AXDisclosureTriangle") &&
       typeof id === "string" && id.startsWith("screen-mirroring-device-") &&
       String(ax(element, "AXDescription") || "").includes(deviceName)
-  }), seconds)
+  })
 }
 
 function extendToAppleTV(deviceName) {
+  const alreadyExtended = () => {
+    const display = displayNamed(deviceName)
+    return display && !display.isMirrored
+  }
+  if (alreadyExtended()) return
+
   leaveFullScreenSpace()
   const app = controlCenterAX()
-  openScreenMirroring(app)
-  delay(2)
-
-  const device = mirroringDevice(app, deviceName, 15)
-  if (!device) {
-    throw new Error("Could not find Apple TV '" + deviceName + "'. Discovered devices: " +
-      JSON.stringify(screenMirroringDevices(app)) + ". Confirm that it is powered on and on the same network as the Mac.")
+  const systemEvents = Application("System Events")
+  let device
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      systemEvents.keyCode(53)
+      delay(0.5)
+    }
+    openScreenMirroring(app)
+    if (attempt === 0) delay(2)
+    device = mirroringDevice(app, deviceName)
+    if (device) break
   }
 
-  if (!isExtending(app)) {
-    if (!isSelected(device) && !press(device)) {
-      throw new Error("Could not select Apple TV '" + deviceName + "'.")
-    }
+  if (!device) {
+    const devices = screenMirroringDevices(app)
+    systemEvents.keyCode(53)
+    throw new Error("Could not find Apple TV '" + deviceName + "' after 3 checks. Discovered devices: " +
+      JSON.stringify(devices) + ". Confirm that it is powered on and on the same network as the Mac.")
+  }
 
-    let choice = waitFor(() => separateDisplayChoice(app), 5)
-    if (!choice) {
+  if (alreadyExtended()) return
+  if (!isSelected(device) && !press(device)) {
+    throw new Error("Could not select Apple TV '" + deviceName + "'.")
+  }
+
+  const windowMenuAt = Date.now() + 1000
+  let changePressed = false
+  // Leave time to bring Edge to the front before the first Window menu check.
+  waitFor(() => {
+    if (alreadyExtended()) return true
+    const choice = separateDisplayChoice(app)
+    if (choice) {
+      if (!press(choice)) throw new Error("Could not select 'Use As Separate Display'.")
+      return true
+    }
+    if (!changePressed) {
       const change = find(app, element =>
         ax(element, "AXRole") === "AXButton" && textOf(element).toLowerCase().includes("change"))
-      if (change && press(change)) choice = waitFor(() => separateDisplayChoice(app), 5)
+      if (change) changePressed = press(change)
     }
-    if (choice && !press(choice)) throw new Error("Could not select 'Use As Separate Display'.")
-
-    if (!waitFor(() => isExtending(app), 15)) {
-      throw new Error("Apple TV connected but did not enter extended-display mode.")
-    }
-  }
+    return false
+  }, 0.7)
+  return windowMenuAt
 }
 
 function edgeWindowsOnDisplay(display) {
@@ -266,7 +289,7 @@ function stopExtending(deviceName) {
   const app = controlCenterAX()
   openScreenMirroring(app)
 
-  const device = mirroringDevice(app, deviceName, 5)
+  const device = waitFor(() => mirroringDevice(app, deviceName), 5)
   if (!device || !press(device)) {
     throw new Error("Could not stop extending to Apple TV '" + deviceName + "'.")
   }
@@ -289,9 +312,6 @@ function selfTest() {
       isWindowOnDisplay({x: -900, y: 200, width: 1000, height: 1080}, display)) {
     throw new Error("Window-to-display self-test failed.")
   }
-  let missingCommandFailed = false
-  try { performMoveCommand({keyCode: () => {}}, null, "Apple TV") } catch (_) { missingCommandFailed = true }
-  if (!missingCommandFailed) throw new Error("A missing 'Move to Apple TV' command did not fail.")
   if (!stopSucceeded(false)) throw new Error("Stopped extension was incorrectly reported as active.")
   if (toggleAction(null, 0) !== "open" ||
       toggleAction({isMirrored: false}, 0) !== "open" ||
@@ -300,6 +320,20 @@ function selfTest() {
     throw new Error("Toggle decision self-test failed.")
   }
   return "PASS"
+}
+
+function findEdgeWindow(edge, url) {
+  for (const window of edge.windows()) {
+    const tabIndex = window.tabs().findIndex(tab => {
+      const tabURL = tab.url()
+      return tabURL === url || tabURL.startsWith(url + "?") || tabURL.startsWith(url + "#")
+    })
+    if (tabIndex >= 0) {
+      window.activeTabIndex = tabIndex + 1
+      return window
+    }
+  }
+  return null
 }
 
 function createEdgeWindow(edge, url) {
@@ -333,46 +367,48 @@ function moveEdgeWindow(deviceName) {
   })
   if (!windowMenu) throw new Error("Could not open the Microsoft Edge Window menu.")
 
-  systemEvents.click(windowMenu)
-  const menu = waitFor(() => {
-    try { return windowMenu.menus()[0] || null } catch (_) { return null }
-  }, 3)
-  const command = menu && waitFor(() => {
+  const moved = waitFor(() => {
+    systemEvents.click(windowMenu)
+    delay(0.1)
+    let command
     try {
-      return menu.menuItems().find(item => {
+      const menu = windowMenu.menus()[0]
+      command = menu && menu.menuItems().find(item => {
         const title = String(item.name())
-        return (title.startsWith("Move to") || title.startsWith("移到")) && title.includes(deviceName)
-      }) || null
+        const match = title.match(/^(?:Move to\s+|移到\s*)(.+)$/)
+        if (!match) return false
+        const destination = match[1].replace(/\s*[（(](?:AirPlay|隔空播放)[）)]$/, "")
+        return destination === deviceName && item.enabled()
+      })
     } catch (_) {
-      return null
+      // The menu can disappear while macOS is adding the display.
     }
-  }, 15)
-  return performMoveCommand(systemEvents, command, deviceName)
-}
-
-function performMoveCommand(systemEvents, command, deviceName) {
-  if (!command) {
+    if (command) {
+      systemEvents.click(command)
+      return true
+    }
+    // Reopen the menu on the next poll so macOS can rebuild its display actions.
     systemEvents.keyCode(53)
+    return false
+  }, 15, 0.5)
+  if (!moved) {
     throw new Error("Could not find the Microsoft Edge 'Move to " + deviceName + "' command.")
   }
-  systemEvents.click(command)
-  return true
 }
 
 function openOnAppleTV(deviceName, url) {
   const edge = Application("Microsoft Edge")
-  const window = url ? createEdgeWindow(edge, url) : edge.windows[0]
+  const window = url ? findEdgeWindow(edge, url) || createEdgeWindow(edge, url) : edge.windows[0]
   if (!window) throw new Error("Could not find a Microsoft Edge window.")
 
   window.index = 1
   edge.activate()
   delay(0.3)
-  extendToAppleTV(deviceName)
-  delay(1)
+  const windowMenuAt = extendToAppleTV(deviceName) || 0
 
   window.index = 1
   edge.activate()
-  delay(0.3)
+  delay(Math.max(0.3, (windowMenuAt - Date.now()) / 1000))
   moveEdgeWindow(deviceName)
 }
 

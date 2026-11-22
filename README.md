@@ -1,106 +1,75 @@
 # tvmode
 
-Move Microsoft Edge windows to an Apple TV and use the Apple TV as a separate display instead of mirroring the Mac.
+Use Apple TV as a separate Mac display and toggle a configured Microsoft Edge webpage onto it.
 
-## Requirements
+## Setup
 
-- macOS and Microsoft Edge
-- The Mac and Apple TV are on the same network
-- The Apple TV is powered on and discoverable in Screen Mirroring
-- Terminal or the invoking script has Accessibility access and permission to control Microsoft Edge
+1. Install Microsoft Edge on the Mac. Turn on the Apple TV and check that it appears in **Control Center → Screen Mirroring** while both devices are on the same network.
+2. Edit `URL` and `APPLE_TV` at the top of [`toggle_apple_tv.command`](toggle_apple_tv.command). Set `APPLE_TV` to the name shown under Screen Mirroring.
+3. In **System Settings → Privacy & Security → Accessibility**, allow the app that launches the script. In **Automation**, allow it to control Microsoft Edge and System Events when prompted. If you use the Terminal entry point, allow Terminal automation when prompted so the script can close its window on success.
 
-## Usage
+## How the toggle works
 
-### Toggle on Mac without opening Terminal
+| Current state | Action | Output |
+| --- | --- | --- |
+| Apple TV is disconnected or mirroring | Switch to a separate display and move the Edge window there | `open` |
+| Apple TV is extended and has no Edge windows | Move the Edge window to the existing display | `open` |
+| Apple TV is extended and has an Edge window | Close all Edge windows on Apple TV and disconnect the display | `close` |
 
-Double-click `Toggle Apple TV.app` in Finder. It runs the existing
-`toggle_apple_tv.command` without opening Terminal and shows an alert if the
-command fails. You can drag the app to the Dock for convenient access.
+On the open path, the script selects and moves the window containing the first matching tab without reloading it. The tab URL can match the configured URL exactly or append `?` or `#` and extra text. If no tab matches, the script opens a new window. The script retries Apple TV discovery and waits for Edge to enable the move command for the configured device.
 
-Keep the app in the repository root, beside `toggle_apple_tv.command`; it uses
-the same URL and Apple TV configuration as that command. On first use, macOS
-may require granting the app Accessibility access in **System Settings →
-Privacy & Security → Accessibility**, and permission to control Edge and
-System Events.
+`open` means the script successfully invoked Edge's move command. `close` means the script finished closing the Edge windows on Apple TV and stopping display extension. On failure, the command writes an error to stderr and returns a nonzero exit code.
 
-The app is generated locally and is not committed. To create or rebuild it,
-run this once from the repository root:
+## Run on Mac
+
+Double-click `toggle_apple_tv.command` in Finder or run it from the repository root:
+
+```zsh
+./toggle_apple_tv.command
+```
+
+Finder opens Terminal to run the command. For local runs in Apple Terminal, the script tries to close the Terminal window that was frontmost at startup after a successful run. On failure, the window stays open with the error.
+
+To run from Finder or the Dock without Terminal, build the launcher once from the repository root:
 
 ```zsh
 /usr/bin/osacompile -o "Toggle Apple TV.app" src/toggle_apple_tv.applescript
 ```
 
-### Open a configured webpage
+Keep `Toggle Apple TV.app` beside `toggle_apple_tv.command`. The app uses the same configuration and displays an alert on failure.
 
-Edit `URL` and `MIRROR_DEVICE` at the top of `open_to_apple_tv.command`, then double-click it in Finder or run it in Terminal:
+## iPhone and Apple Watch Shortcuts over SSH
 
-```zsh
-./open_to_apple_tv.command
+Enable **Remote Login** in **System Settings → General → Sharing** and allow the Mac account the shortcut will use. Keep that account logged in to the Mac desktop. The SSH-launched `osascript` needs Accessibility and Automation permissions. [Apple's Remote Login guide](https://support.apple.com/guide/mac-help/allow-a-remote-computer-to-access-your-mac-mchlp1066/mac)
+
+On iPhone, add **Run Script over SSH**, enter the Mac's host and account details, and use the script below. If your checkout is elsewhere, adjust the path. The wrapper returns `open`, `close`, or the error output as text so the shortcut can handle each result.
+
+```sh
+output=$(/bin/zsh "$HOME/Projects/tvmode/toggle_apple_tv.command" 2>&1)
+printf '%s\n' "$output"
 ```
 
-The script starts Edge, creates a window, connects to Apple TV in separate-display mode, and moves the new window to it.
+For Apple Watch, use a shortcut with just the SSH action. In the shortcut's details on iPhone, turn on **Show on Apple Watch**. If it appears in the watch's Shortcuts app, tap it there or ask Siri to run it by name. [Apple's Watch Shortcuts guide](https://support.apple.com/guide/shortcuts/run-shortcuts-from-apple-watch-apd5888b0858/ios)
 
-All four `.command` files briefly show Terminal when launched from Finder. The launching window closes automatically on success and remains open with the error on failure. SSH calls never operate on Terminal; errors are written to stderr and return a nonzero exit code.
-
-### Move the current Edge window
-
-Edit `APPLE_TV` at the top of `extend_current_edge_to_apple_tv.command`, then run:
-
-```zsh
-./extend_current_edge_to_apple_tv.command
-```
-
-This command does not create a window or open a URL. It moves the frontmost Edge window and verifies that the window is on the Apple TV display.
-
-### Stop Apple TV mode
-
-Edit `APPLE_TV` at the top of `stop_extending_apple_tv.command`, then run:
-
-```zsh
-./stop_extending_apple_tv.command
-```
-
-If Apple TV is being used as a separate display, the command closes every Edge window on that display before stopping extension. It does nothing when Apple TV is not extended.
-
-## iPhone Shortcut over SSH
-
-Use the Run Script over SSH action in iPhone Shortcuts and connect it to the Mac running these scripts. The Mac must have an active desktop login, and `osascript` must have Accessibility and Automation permissions.
-
-### One-button automatic toggle (recommended)
-
-`toggle_apple_tv.command` follows the Mac's current state:
-
-- Not extended to Apple TV: opens the webpage and moves its Edge window to Apple TV.
-- Extended with no Edge window on Apple TV: opens the webpage and moves its Edge window there.
-- Extended with an Edge window on Apple TV: closes all Edge windows there and stops extension.
-
-Every command prints exactly one state after a successful operation:
-
-- `open`: Apple TV mode is open and Edge accepted the command to move the window to Apple TV.
-- `close`: Apple TV mode is closed.
-
-On failure, the command exits with a nonzero status and never prints a success state.
-The open path does not turn a completed move into an error solely because macOS reports stale window coordinates. The recommended toggle command also removes `osascript`'s repeated `execution error: Error:` wrapper from genuine failures.
-
-Replace the SSH script in the existing shortcut with this wrapper. It returns `open`, `close`, or a clean error message without stopping the shortcut:
-
-```zsh
-output=$(/bin/zsh /Users/chrisyao/Projects/tvmode/toggle_apple_tv.command 2>&1)
-print -r -- "$output"
-```
-
-After **Run Script over SSH**, add an **If** action:
+To control another app from an iPhone shortcut, add an **If** action after **Run Script over SSH**:
 
 1. If the result is `open`, use **Open App** for the other app.
-2. Otherwise, if the result is `close`, run that app's own close/stop action. If it has no such action, use **Go to Home Screen**; iOS Shortcuts cannot force-quit an arbitrary app.
-3. Otherwise, use **Show Alert** with the complete script result. The alert will contain only the specific error message.
+2. Otherwise, if the result is `close`, run that app's own close or stop action if available, or use **Go to Home Screen**.
+3. Otherwise, use **Show Alert** to display the script output.
 
 SSH calls do not open or close Terminal on the Mac.
 
-## Project structure
+## Development
 
-- The four `.command` files in the repository root are user entry points that can be launched from Finder. The recommended phone entry point is `toggle_apple_tv.command`.
-- `src/open_to_apple_tv.jxa.js` is shared by all four entry points and automates Control Center and Edge through macOS Accessibility APIs.
-- `src/verify_current_edge_on_apple_tv.jxa.js` verifies the position of an existing window.
+- [`toggle_apple_tv.command`](toggle_apple_tv.command) is the shared entry point for Finder, Terminal, the Mac app, and SSH shortcuts.
+- [`src/open_to_apple_tv.jxa.js`](src/open_to_apple_tv.jxa.js) uses JavaScript for Automation and macOS Accessibility APIs to control Edge and Screen Mirroring.
+- [`src/toggle_apple_tv.applescript`](src/toggle_apple_tv.applescript) runs the shared command from the Mac app.
 
-The scripts depend on the macOS and Edge accessibility hierarchies, which may change after system updates. Changes involving screen mirroring, window movement, or display coordinates must be validated on a real Apple TV.
+From the repository root, run the Node.js tests for tab reuse, device discovery, and menu retries, and the macOS self-test for display geometry and toggle decisions:
+
+```zsh
+node tests/open_to_apple_tv.test.js
+/usr/bin/osascript -l JavaScript src/open_to_apple_tv.jxa.js "Apple TV" --self-test
+```
+
+On a real Apple TV, confirm that opening moves the expected Edge window to a separate display and that toggling again closes the Edge windows there and disconnects the display. macOS and Edge updates can change the controls the script uses.
